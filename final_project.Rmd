@@ -1,0 +1,253 @@
+---
+title: "Final Project"
+author: "Drew Donahue"
+date: "2025-05-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Load libraries
+```{r}
+library(tidyverse)
+library(rvest)
+library(dplyr)
+```
+
+Scrape TFRRS data
+```{r}
+#Explicitly add name to end of link
+make_url <- function(urls) {
+  return(paste0("https://www.tfrrs.org", urls))
+}
+#Fix table of times
+reshape_tfrss_table <- function(df) {
+  col_names <- names(df)
+  #group events with events, times with times
+  pairs <- split(col_names, ceiling(seq_along(col_names) / 2))
+  
+  #rename and bind together so we just have two columns
+  bind_rows(lapply(pairs, function(cols) {
+    if (length(cols) == 2) {
+      df[cols] |>
+        rename(event = !!cols[1], time = !!cols[2]) |>
+        mutate(event = as.character(event)) |> 
+        filter(!is.na(event), !is.na(time))
+    } else {
+      NULL
+    }
+  }))
+}
+
+
+# #Start with midd
+# midd_url <- "https://www.tfrrs.org/teams/tf/VT_college_m_Middlebury.html"
+# 
+# middxc_url <- "https://www.tfrrs.org/teams/xc/VT_college_m_Middlebury.html"
+# xc_athlete_urls_list <- read_html(middxc_url) |> 
+#   html_nodes("a") |> 
+#   html_attr("href") |> 
+#   str_subset("athletes") |> 
+#   unique() |>  
+#   make_url()
+
+#Get team info
+get_team_info <- function(team_url) { 
+  #put together list of URLs for whole team
+  athlete_urls_list <- read_html(team_url) |> 
+    html_nodes("a") |> 
+    html_attr("href") |> 
+    str_subset("athletes") |> 
+    unique() |>  
+    make_url()
+  
+  return(athlete_urls_list)
+}
+
+#Get names of each individual member of team
+get_name_info <- function(team_info) {
+  xc_names_urls_split <- team_info |> 
+    strsplit("/") |> 
+    as.data.frame()
+  xc_names_list <- xc_names_urls_split[7,] |> 
+    pivot_longer(
+      cols = everything(),
+      names_to = "random",
+      values_to = "chode"
+    )
+  return(xc_names_list$chode)
+}
+
+#Take each distance athlete and return neat table of PRs
+find_prs <- function(athlete_url, profile_type, team) { 
+  curr_athlete <- read_html(athlete_url)
+  
+  prs <- curr_athlete |> 
+    html_node("table") |> 
+    html_table()
+  
+  #Fix table given by format in track tfrrs, convert to just distance events with times
+  if(profile_type == "Track") { 
+    prs_clean <- reshape_tfrss_table(prs)
+    prs_clean <- prs_clean |> 
+      filter(event %in% c("800", "1500", "MILE", "5000"))  
+  } 
+  else { 
+    if (team == "VT_college_m_Middlebury.html") { 
+      prs_clean <- prs |> 
+      mutate(event = "8k", 
+             time = X2) |> 
+      select(event, 
+             time)
+      }
+    else { 
+      prs_clean <- reshape_tfrss_table(prs)
+      prs_clean <- prs_clean |> 
+        filter(event %in% c("8k", "8K(XC)", "8K (XC)"))
+    }
+  }
+  
+  return(prs_clean)
+}
+
+
+#Outer loop will go through each team
+compile_team_data <- function(team) {
+  #Inner loop will go through each athlete on team
+  curr_xc_url <- paste0("https://www.tfrrs.org/teams/xc/", team)
+  curr_tf_url <- paste0("https://www.tfrrs.org/teams/tf/", team)
+  
+  curr_xc_team_info <- get_team_info(curr_xc_url)
+  curr_xc_name_info <- get_name_info(curr_xc_team_info)
+  xc_names <- paste(curr_xc_name_info, collapse = "|")
+  
+  
+  curr_tf_team_info <- get_team_info(curr_tf_url)
+  curr_tf_team_info <- curr_tf_team_info[!grepl("https://www.tfrrs.orghttps://www.tfrrs.org/athletes/", curr_tf_team_info)]
+  #Get track profiles filtered to only contain people who ran XC
+  names_filtered_tf_info <- curr_tf_team_info[grepl(xc_names, curr_tf_team_info)]
+  #middtf_name_info <- get_name_info(curr_tf_team_info)
+  
+  #Get track data and format
+  curr_tf_data <- lapply(names_filtered_tf_info, find_prs, profile_type = "Track", team = team)
+  
+  #Add names back to track info
+  working_names <- get_name_info(names_filtered_tf_info)
+  curr_tf_data_names <- Map(function(tf_data, name_id) { 
+    tf_data |> mutate(name_id = name_id)
+  }, curr_tf_data, working_names)
+  
+  curr_tf_df <- curr_tf_data_names |> 
+    bind_rows()
+  
+  curr_xc_data <- lapply(curr_xc_team_info, find_prs, profile_type = "XC", team = team)
+  curr_xc_data_names <- Map(function(xc_data, name_id) { 
+    xc_data |> mutate(name_id = name_id)
+  }, curr_xc_data, curr_xc_name_info)
+  
+  curr_xc_df <- curr_xc_data_names |> 
+    bind_rows()
+  
+  #Combine tf and xc datasets (for names that work)
+  combined_dataset <- rbind(curr_tf_df, curr_xc_df)
+  
+  combined_dataset_final <- combined_dataset |> 
+    pivot_wider(
+      names_from = event, 
+      values_from = time)
+  
+  rm(curr_tf_data, curr_tf_team_info, curr_tf_url, curr_xc_df, curr_xc_name_info, curr_xc_team_info, curr_xc_url, names_filtered_tf_info, working_names, xc_names)
+  
+  closeAllConnections()
+  return(combined_dataset_final)
+  #nescac_full_df <- rbind(nescac_full_df, combined_dataset_final)
+}
+
+# 
+# 
+# #Try for track data
+# fred_bot <- find_prs(athlete_urls_list[5], "Track")
+# 
+# fred_bot <- find_prs(xc_athlete_urls_list[5], "XC")
+# 
+# athlete_url <- xc_athlete_urls_list[2]
+# fred_bot <- athlete_urls_list[5]
+# df <- read_html(xc_athlete_urls_list[5]) |> 
+#   html_node("table") |> 
+#   html_table()
+
+#curr_athlete <- read_html(athlete_urls_list[1])
+
+
+
+```
+
+
+Use functions above to finalize data prep
+```{r}
+#List of NESCAC teams tfrrs ids:
+nescac_team_ids <- c("VT_college_m_Middlebury.html", 
+                     "MA_college_m_Amherst.html",
+                     "ME_college_m_Bates.html", 
+                     "ME_college_m_Bowdoin.html", 
+                     "ME_college_m_Colby.html",
+                     "CT_college_m_Conn_College.html", 
+                     "NY_college_m_Hamilton.html", 
+                     "CT_college_m_Trinity_CT.html", 
+                     "MA_college_m_Tufts.html", 
+                     "CT_college_m_Wesleyan.html", 
+                     "MA_college_m_Williams.html")
+
+nescac_full_df <- data.frame()
+midd_data <- compile_team_data("VT_college_m_Middlebury.html")
+amherst_data <- compile_team_data("MA_college_m_Amherst.html")
+bates_data <- compile_team_data("ME_college_m_Bates.html")
+bowdoin_data <- compile_team_data("ME_college_m_Bowdoin.html")
+colby_data <- compile_team_data("ME_college_m_Colby.html")
+conn_data <- compile_team_data("CT_college_m_Conn_College.html")
+hamilton_data <- compile_team_data("NY_college_m_Hamilton.html")
+trinity_data <- compile_team_data("CT_college_m_Trinity_CT.html")
+tufts_data <- compile_team_data("MA_college_m_Tufts.html")
+wes_data_data <- compile_team_data("CT_college_m_Wesleyan.html")
+williams_data_data <- compile_team_data("MA_college_m_Williams.html")
+
+#Combine into full df
+nescac_full_df <- bind_rows(midd_data, amherst_data)
+nescac_full_df <- bind_rows(nescac_full_df, bates_data)
+nescac_full_df <- bind_rows(nescac_full_df,bowdoin_data )
+nescac_full_df <- bind_rows(nescac_full_df, colby_data)
+nescac_full_df <- bind_rows(nescac_full_df,conn_data)
+nescac_full_df <- bind_rows(nescac_full_df, hamilton_data)
+nescac_full_df <- bind_rows(nescac_full_df, trinity_data)
+nescac_full_df <- bind_rows(nescac_full_df, tufts_data)
+nescac_full_df <- bind_rows(nescac_full_df, wes_data_data)
+nescac_full_df <- bind_rows(nescac_full_df, williams_data_data)
+
+                            
+write.csv(nescac_full_df, "/Users/drew/Documents/Middlebury/Year 4/Spring/Stat Learning/Final Project/xc_data.csv")
+  
+nescac_full_df
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Give background on what model will be used, what this model does, and why it was chosen given this data
+

@@ -42,18 +42,6 @@ reshape_tfrss_table <- function(df) {
   }))
 }
 
-
-# #Start with midd
-# midd_url <- "https://www.tfrrs.org/teams/tf/VT_college_m_Middlebury.html"
-# 
-# middxc_url <- "https://www.tfrrs.org/teams/xc/VT_college_m_Middlebury.html"
-# xc_athlete_urls_list <- read_html(middxc_url) |> 
-#   html_nodes("a") |> 
-#   html_attr("href") |> 
-#   str_subset("athletes") |> 
-#   unique() |>  
-#   make_url()
-
 #Get team info
 get_team_info <- function(team_url) { 
   #put together list of URLs for whole team
@@ -76,9 +64,9 @@ get_name_info <- function(team_info) {
     pivot_longer(
       cols = everything(),
       names_to = "random",
-      values_to = "chode"
+      values_to = "athlete_name"
     )
-  return(xc_names_list$chode)
+  return(xc_names_list$athlete_name)
 }
 
 #Take each distance athlete and return neat table of PRs
@@ -129,7 +117,6 @@ compile_team_data <- function(team) {
   curr_tf_team_info <- curr_tf_team_info[!grepl("https://www.tfrrs.orghttps://www.tfrrs.org/athletes/", curr_tf_team_info)]
   #Get track profiles filtered to only contain people who ran XC
   names_filtered_tf_info <- curr_tf_team_info[grepl(xc_names, curr_tf_team_info)]
-  #middtf_name_info <- get_name_info(curr_tf_team_info)
   
   #Get track data and format
   curr_tf_data <- lapply(names_filtered_tf_info, find_prs, profile_type = "Track", team = team)
@@ -165,23 +152,6 @@ compile_team_data <- function(team) {
   return(combined_dataset_final)
   #nescac_full_df <- rbind(nescac_full_df, combined_dataset_final)
 }
-
-# 
-# 
-# #Try for track data
-# fred_bot <- find_prs(athlete_urls_list[5], "Track")
-# 
-# fred_bot <- find_prs(xc_athlete_urls_list[5], "XC")
-# 
-# athlete_url <- xc_athlete_urls_list[2]
-# fred_bot <- athlete_urls_list[5]
-# df <- read_html(xc_athlete_urls_list[5]) |> 
-#   html_node("table") |> 
-#   html_table()
-
-#curr_athlete <- read_html(athlete_urls_list[1])
-
-
 
 ```
 
@@ -229,5 +199,4 @@ nescac_full_df <- bind_rows(nescac_full_df, williams_data_data)
                             
 write.csv(nescac_full_df, "/Users/drew/Documents/Middlebury/Year 4/Spring/Stat Learning/Final Project/xc_data.csv")
   
-nescac_full_df
 ```
